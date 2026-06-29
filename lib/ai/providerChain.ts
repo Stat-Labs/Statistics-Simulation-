@@ -64,19 +64,33 @@ async function callGemini(
   userPrompt: string
 ): Promise<string> {
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${config.ai.geminiApiKey}`,
+    `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${config.ai.geminiApiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+        // 🌟 Pass the system prompt correctly using Google's official parameter
+        systemInstruction: {
+          parts: [{ text: systemPrompt }]
+        },
+        contents: [
+          { 
+            role: 'user', 
+            parts: [{ text: userPrompt }] 
+          }
+        ],
+        generationConfig: { 
+          temperature: 0.1, // Lower temperature for more reliable JSON structure
+          maxOutputTokens: 2048,
+          responseMimeType: "application/json" // 🌟 FORCES Gemini to return pure JSON
+        },
       }),
     }
   )
 
   if (!response.ok) {
-    throw new Error(`Gemini API error: ${response.status} ${response.statusText}`)
+    const errText = await response.text();
+    throw new Error(`Gemini API error [${response.status}]: ${errText}`)
   }
 
   const data = await response.json()
@@ -160,7 +174,7 @@ export async function callAI(
     { name: 'deepseek' as AIProvider, key: config.ai.deepseekApiKey, fn: () => callDeepseek(systemPrompt, userPrompt) },
     { name: 'huggingface' as AIProvider, key: config.ai.huggingfaceApiKey, fn: () => callHuggingFace(systemPrompt, userPrompt) },
   ]
-  const providers = providerConfigs.filter(p => p.key.length > 0)
+  const providers = providerConfigs.filter(p => p.key && typeof p.key === 'string' && p.key.trim().length > 0)
 
   for (const provider of providers) {
     try {

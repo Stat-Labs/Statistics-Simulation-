@@ -1,19 +1,18 @@
-import type { Metadata } from "next";
-import "./globals.css";
-
-export const metadata: Metadata = {
-  title: "StatLab",
-  description: "Statistical Analysis Platform",
-};
+import { StatLabProvider } from '@/components/StatLabProvider'
+import './globals.css' // Keep your existing CSS import here
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: {
+  children: React.ReactNode
+}) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className="bg-zinc-950 text-zinc-50 antialiased">
+        <StatLabProvider>
+          {children}
+        </StatLabProvider>
+      </body>
     </html>
-  );
+  )
 }
