@@ -45,7 +45,10 @@ export default function AnalysePage() {
   const alignmentHasPredictive = !!(predictive?.modelType || predictive?.regressionResult)
 
   const handleExport = () => {
-    window.print()
+    // 🚀 FIX: Give the UI thread 500ms to completely paint non-animated SVGs before running print pipeline
+    setTimeout(() => {
+      window.print()
+    }, 500)
   }
 
   return (
@@ -125,11 +128,11 @@ export default function AnalysePage() {
               <svg className="w-3.5 h-3.5 text-zinc-950" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.5l5-5 4 4 5-6 4 3" />
               </svg>
-            </div>
+            </div >
             <span className="font-semibold tracking-tight">StatLab</span>
             <span className="hidden sm:block text-zinc-600">/</span>
             <span className="hidden sm:block text-zinc-400 text-sm font-mono truncate max-w-xs">{fileName}</span>
-          </div>
+          </div >
           <button
             onClick={handleExport}
             disabled={isGenerating}
@@ -324,10 +327,10 @@ export default function AnalysePage() {
                         <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-emerald-500 rounded-full"
-                            style={{ width: `${Math.min(100, (imp as number) * 100)}%` }}
+                            style={{ width: `${Math.min(100, Number(imp) * 100)}%` }}
                           />
                         </div>
-                        <span className="text-xs font-mono text-zinc-500">{((imp as number) * 100).toFixed(1)}%</span>
+                        <span className="text-xs font-mono text-zinc-500">{(Number(imp) * 100).toFixed(1)}%</span>
                       </div>
                     ))}
                   </div>
@@ -571,10 +574,10 @@ export default function AnalysePage() {
                       <div className="flex-1 h-3 bg-slate-100 border border-black rounded-sm overflow-hidden">
                         <div
                           className="h-full bg-[#059669]"
-                          style={{ width: `${Math.min(100, (imp as number) * 100)}%` }}
+                          style={{ width: `${Math.min(100, Number(imp) * 100)}%` }}
                         />
                       </div>
-                      <span className="font-mono text-slate-900 w-12 text-right">{((imp as number) * 100).toFixed(1)}%</span>
+                      <span className="font-mono text-slate-900 w-12 text-right">{(Number(imp) * 100).toFixed(1)}%</span>
                     </div>
                   ))}
                 </div>
@@ -587,13 +590,12 @@ export default function AnalysePage() {
         {interpret.perAnalysis.length > 0 && (
           <div className="print-page pt-4 space-y-6 bg-white">
             <div className="border-b-4 border-[#059669] pb-2 flex justify-between items-end">
-              <h2 className="text-xl font-black tracking-tight text-slate-900 uppercase">04. AI Structural Interpretations</h2>
+              <h2 className="text-xl font-black tracking-tight text-slate-900 uppercase">04. AI Contextual Card List Analysis</h2>
               <span className="text-xs text-slate-400 font-mono">Page 5</span>
             </div>
 
             <div className="space-y-4">
               {interpret.perAnalysis.map((item, i) => (
-                /* Added 'print-avoid-break' here so the card stays physically grouped together */
                 <div key={i} className="print-border-opaque p-5 bg-white rounded-xl space-y-2 print-avoid-break">
                   <div className="flex justify-between items-center border-b border-slate-200 pb-2">
                     <span className="text-[10px] font-black text-[#059669] uppercase tracking-wider">Contextual Node Target</span>
@@ -606,7 +608,7 @@ export default function AnalysePage() {
           </div>
         )}
 
-        {/* 🌟 NEW PAGE 6: DATA VISUALIZATIONS & CHARTS PRODUCTION ENGINE */}
+        {/* NEW PAGE 6: DATA VISUALIZATIONS & CHARTS PRODUCTION ENGINE */}
         {chartSuggestions.length > 0 && (
           <div className="print-page pt-4 space-y-6 bg-white">
             <div className="border-b-4 border-[#059669] pb-2 flex justify-between items-end">
@@ -693,10 +695,10 @@ function ChartCard({ suggestion, activeSession, index }: { suggestion: ChartSugg
               <XAxis dataKey="x" name={x} tick={{ fontSize: 10, fill: '#71717a' }} />
               <YAxis dataKey="y" name={y || 'Predicted Value'} tick={{ fontSize: 10, fill: '#71717a' }} />
               <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', fontSize: 12 }} />
-              <Scatter data={processedData} fill={color} fillOpacity={0.8} />
+              <Scatter data={processedData as any[]} fill={color} fillOpacity={0.8} />
             </ScatterChart>
           ) : chartType === 'line' ? (
-            <LineChart data={processedData}>
+            <LineChart data={processedData as any[]}>
               <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#71717a' }} />
               <YAxis tick={{ fontSize: 10, fill: '#71717a' }} />
@@ -705,8 +707,8 @@ function ChartCard({ suggestion, activeSession, index }: { suggestion: ChartSugg
             </LineChart>
           ) : chartType === 'pie' ? (
             <PieChart>
-              <Pie data={processedData.slice(0, 6)} dataKey="value" nameKey="name" outerRadius={80} strokeWidth={0}>
-                {processedData.slice(0, 6).map((_, i) => (
+              <Pie data={(processedData as any[]).slice(0, 6)} dataKey="value" nameKey="name" outerRadius={80} strokeWidth={0}>
+                {(processedData as any[]).slice(0, 6).map((_, i) => (
                   <Cell key={`cell-${i}`} fill={ACCENT[i % ACCENT.length]} />
                 ))}
               </Pie>
@@ -714,7 +716,7 @@ function ChartCard({ suggestion, activeSession, index }: { suggestion: ChartSugg
               <Legend iconSize={8} wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }} />
             </PieChart>
           ) : (
-            <BarChart data={processedData}>
+            <BarChart data={processedData as any[]}>
               <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#71717a' }} />
               <YAxis tick={{ fontSize: 10, fill: '#71717a' }} />
@@ -725,7 +727,7 @@ function ChartCard({ suggestion, activeSession, index }: { suggestion: ChartSugg
         </ResponsiveContainer>
       </div>
     </div>
-  )
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -779,43 +781,67 @@ function PrintChartCard({ suggestion, activeSession, index }: { suggestion: Char
         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
         <XAxis dataKey="x" name={x} tick={{ fontSize: 9, fill: '#475569' }} />
         <YAxis dataKey="y" name={y || 'Predicted'} tick={{ fontSize: 9, fill: '#475569' }} />
-        <Scatter data={processedData} fill={color} fillOpacity={0.8} />
+        <Scatter data={processedData} fill={color} fillOpacity={0.8} isAnimationActive={false} />
       </ScatterChart>
     )
   }
 
   if (chartType === 'line') {
     return (
-      <LineChart width={620} height={240} data={processedData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+      <LineChart width={620} height={240} data={processedData as any[]} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
         <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#475569' }} />
         <YAxis tick={{ fontSize: 9, fill: '#475569' }} />
-        <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={true} />
+        <Line 
+          type="monotone" 
+          dataKey="value" 
+          stroke={color} 
+          strokeWidth={2} 
+          dot={false} 
+          isAnimationActive={false} /* 👈 TURNS OFF ANIMATION */
+        />
       </LineChart>
-    )
+    );
+  }
+
+  if (chartType === 'bar') {
+    return (
+      <BarChart width={620} height={240} data={processedData as any[]} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+        <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#475569' }} />
+        <YAxis tick={{ fontSize: 9, fill: '#475569' }} />
+        <Bar 
+          dataKey="value" 
+          fill={color} 
+          radius={[3, 3, 0, 0]} 
+          isAnimationActive={false} /* 👈 TURNS OFF ANIMATION */
+        />
+      </BarChart>
+    );
   }
 
   if (chartType === 'pie') {
     return (
       <PieChart width={620} height={240}>
-        <Pie data={processedData.slice(0, 6)} dataKey="value" nameKey="name" outerRadius={70} stroke="#ffffff" strokeWidth={2}>
-          {processedData.slice(0, 6).map((_, i) => (
+        <Pie 
+          data={(processedData as any[]).slice(0, 6)} 
+          dataKey="value" 
+          nameKey="name" 
+          outerRadius={80} 
+          strokeWidth={1}
+          stroke="#000000"
+          isAnimationActive={false} /* 👈 TURNS OFF ANIMATION */
+        >
+          {(processedData as any[]).slice(0, 6).map((_, i) => (
             <Cell key={`cell-${i}`} fill={PRINT_ACCENT[i % PRINT_ACCENT.length]} />
           ))}
         </Pie>
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: '#1e293b' }} />
+        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: '#0f172a' }} />
       </PieChart>
     )
   }
-
-  return (
-    <BarChart width={620} height={240} data={processedData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
-      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-      <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#475569' }} />
-      <YAxis tick={{ fontSize: 9, fill: '#475569' }} />
-      <Bar dataKey="value" fill={color} radius={[2, 2, 0, 0]} />
-    </BarChart>
-  )
+  
+  return null
 }
 
 function fmt(v: number | null | undefined) {
@@ -854,7 +880,6 @@ function SectionHeader({ title, count }: { title: string; count?: number }) {
   )
 }
 
-// Fixed target bg mapping token error
 function StatCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5 shadow-sm">
