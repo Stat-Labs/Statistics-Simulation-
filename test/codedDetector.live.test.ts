@@ -16,7 +16,7 @@ if (fs.existsSync(envPath)) {
 }
 
 function col(name: string, type: Column['type'], uniques: (string|number)[], samples: unknown[]): Column {
-  return { name, type, uniqueValues: uniques, sampleValues: samples, nullCount: 0 }
+  return { name, type, uniqueValues: uniques as string[] | number[], sampleValues: samples, nullCount: 0 }
 }
 
 async function main() {

@@ -1,5 +1,6 @@
 import type { DatasetSchema, AnalysisResult, InterpretResponseBody } from '@/lib/types'
-import { callAI } from '@/lib/ai/providerChain'
+import { callAIForUser, type AIContext } from '@/lib/ai/resolve'
+import type { RetrievedContext } from '@/lib/memory/types'
 
 export function buildInterpreterSystemPrompt(): string {
   return `You are StatLab AI, a senior Data Scientist with 15+ years of experience in statistics, machine learning, experimentation, and business analytics.
@@ -27,13 +28,41 @@ Rules:
 - When business translation is provided, reference it in your interpretation
 - Flag statistical significance clearly
 - Always include limitations when relevant
+- When WORKSPACE MEMORY is provided, build on past findings where they agree, and explicitly flag when the current data contradicts or revises a past conclusion
 - Return ONLY valid JSON, no preamble, no markdown`
+}
+
+export function buildMemoryContextSection(memory: RetrievedContext): string {
+  const parts: string[] = []
+  if (memory.findings.length > 0) {
+    parts.push(
+      'PAST FINDINGS:',
+      ...memory.findings
+        .slice(0, 6)
+        .map((f) => `- [${f.severity}] ${f.title}: ${f.body}`),
+    )
+  }
+  if (memory.kpis.length > 0) {
+    parts.push(
+      'TRACKED KPIs:',
+      ...memory.kpis.slice(0, 6).map((k) => `- ${k.displayLabel ?? k.name} = ${k.valueText}`),
+    )
+  }
+  if (memory.glossary.length > 0) {
+    parts.push(
+      'DEFINED GLOSSARY:',
+      ...memory.glossary.slice(0, 6).map((g) => `- ${g.term}: ${g.definition}`),
+    )
+  }
+  if (parts.length === 0) return ''
+  return `\n\nWORKSPACE MEMORY (learned from prior analyses in this workspace — use it to enrich your interpretation, stay consistent with it, and flag contradictions with the current data):\n${parts.join('\n')}`
 }
 
 export function buildInterpreterUserPrompt(
   schema: DatasetSchema,
   result: AnalysisResult,
   modelTrainingReport?: Record<string, unknown> | null,
+  memory?: RetrievedContext | null,
 ): string {
   let modelTrainingContext = '';
   if (modelTrainingReport) {
@@ -102,6 +131,7 @@ ${result.predictive.regressionResult.featureImportance ? `Feature Importance:\n$
     .map(([feat, imp]) => `  ${feat}: ${(Number(imp) * 100).toFixed(1)}%`)
     .join('\n')}` : ''}` : ''}
 ${modelTrainingContext}
+${memory ? buildMemoryContextSection(memory) : ''}
 
 RESPONSE FORMAT:
 Return ONLY a raw valid JSON object (no markdown, no code fences):
@@ -165,10 +195,12 @@ export async function runInterpreter(
   schema: DatasetSchema,
   result: AnalysisResult,
   modelTrainingReport?: Record<string, unknown> | null,
+  ctx: AIContext = {},
+  memory?: RetrievedContext | null,
 ): Promise<Pick<InterpretResponseBody, 'summary' | 'perAnalysis'> & { provider: string; fallbackUsed: boolean }> {
   const system = buildInterpreterSystemPrompt()
-  const user = buildInterpreterUserPrompt(schema, result, modelTrainingReport)
-  const response = await callAI(system, user, validateInterpreterResponse, 'groq')
+  const user = buildInterpreterUserPrompt(schema, result, modelTrainingReport, memory)
+  const response = await callAIForUser(ctx, system, user, validateInterpreterResponse)
   const parsed = parseInterpreterResponse(response.content)
   return {
     ...parsed,
