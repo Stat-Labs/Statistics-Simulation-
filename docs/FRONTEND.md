@@ -5,6 +5,7 @@
 | What | Library | Why |
 |------|---------|-----|
 | Charts | **Recharts** (`recharts`) | All chart types: scatter, line, bar, histogram, heatmap, boxplot, pie |
+| Interactive Charts | **Apache ECharts** (`echarts`) | Used for the Visualization Intelligence Engine dashboard (automatically rendered from backend specs) |
 | Client-side CSV parsing | **Papa Parse** (`papaparse`) | Extract column names + sample rows for schema, then send raw CSV to backend |
 | PDF export | **jsPDF + html2canvas** (`lib/pdf/usePDFExport.ts`) | Built-in React hook — just pass DOM element IDs |
 | Styling | **Tailwind CSS** | Already configured |
@@ -18,6 +19,7 @@ Install Papa Parse: `npm install papaparse`
 |-------|-------------|
 | `/` | CSV upload + mode selection (Smart / Manual) |
 | `/analyse` | Shows results: charts, stats tables, AI text, PDF export |
+| `/visualize` | Visualization Intelligence dashboard page — upload dataset, render ECharts charts |
 
 ## The 3 API calls (in order)
 
@@ -163,6 +165,26 @@ Then go straight to `/api/analyse` with the raw CSV.
 ## Full flow summary
 
 ```
-Smart:  Upload CSV → parse with PapaParse → POST /api/profile → map to AnalysisRequest → POST /api/analyse → POST /api/interpret → render all
-Manual: Upload CSV → build AnalysisRequest from form → POST /api/analyse → (skip interpret if no AI key) → render
+Smart:      Upload CSV → parse with PapaParse → POST /api/profile → map to AnalysisRequest → POST /api/analyse → POST /api/interpret → render all
+Manual:     Upload CSV → build AnalysisRequest from form → POST /api/analyse → (skip interpret if no AI key) → render
+Visualize:  Upload CSV → POST /api/visualize → receive VisualizationResponse → render sections via VizDashboard using EChart components
 ```
+
+## Visualization Intelligence Engine (VIE) Flow
+
+The `/visualize` page utilizes the deterministic, explainable Visualization Intelligence Engine (VIE) located in the Python backend. The frontend does not decide or infer chart configuration; it acts as a renderer of backend-generated ECharts configurations.
+
+1. **Upload Dataset**: The user picks a CSV or Excel file on the `/visualize` page.
+2. **Retrieve Specifications**: The frontend performs a `POST` request to `/api/visualize` with the file.
+3. **Parse Dashboard response**: The response is a `VisualizationResponse` object which includes:
+   - Metadata (`fileName`, `rowCount`, `columnCount`)
+   - Statistical patterns (`detectedPatterns`)
+   - Inferred user intents (`intents`)
+   - Structured sections (`sections`) containing charts (`VizChart`)
+4. **Render Dashboard**:
+   - The `/visualize` page renders the header and metadata statistics.
+   - It iterates over `sections` and renders a `VizDashboard` component.
+   - For each chart, it renders an `EChart` wrapper component.
+   - Each chart displays its confidence score, advantages, limitations, and alternatives when expanded.
+   - If a chart's verification fails, a warning badge is shown.
+

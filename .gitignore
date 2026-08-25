@@ -40,3 +40,10 @@ next-env.d.ts
 # python
 __pycache__/
 *.pyc
+
+# local sqlite dev database
+db/*.sqlite
+db/*.sqlite-*
+
+# local storage adapter (STORAGE_PROVIDER=local)
+/storage

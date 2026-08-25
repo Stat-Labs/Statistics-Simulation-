@@ -1,5 +1,5 @@
 import type { DatasetSchema, ProfilerOutput } from '@/lib/types'
-import { callAI } from '@/lib/ai/providerChain'
+import { callAIForUser, type AIContext } from '@/lib/ai/resolve'
 
 export function buildProfilerSystemPrompt(): string {
   return `You are a senior data scientist assistant embedded in StatLab.
@@ -137,10 +137,11 @@ function validateProfilerResponse(raw: string): boolean {
 }
 
 export async function runProfiler(
-  schema: DatasetSchema
+  schema: DatasetSchema,
+  ctx: AIContext = {},
 ): Promise<ProfilerOutput> {
   const system = buildProfilerSystemPrompt()
   const user = buildProfilerUserPrompt(schema)
-  const response = await callAI(system, user, validateProfilerResponse, 'mistral')
+  const response = await callAIForUser(ctx, system, user, validateProfilerResponse)
   return parseProfilerResponse(response.content, schema)
 }

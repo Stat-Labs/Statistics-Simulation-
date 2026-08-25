@@ -1,5 +1,13 @@
+import type { Metadata } from 'next'
 import { StatLabProvider } from '@/components/StatLabProvider'
-import './globals.css' // Keep your existing CSS import here
+import { AuthProvider } from '@/components/AuthProvider'
+import './globals.css'
+
+export const metadata: Metadata = {
+  title: 'StatLab — Your AI Data Scientist',
+  description:
+    'Upload a dataset and get instant statistical analysis, machine learning, forecasting and plain-English insights — powered by AI.',
+}
 
 export default function RootLayout({
   children,
@@ -9,9 +17,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-zinc-950 text-zinc-50 antialiased">
-        <StatLabProvider>
-          {children}
-        </StatLabProvider>
+        <AuthProvider>
+          <StatLabProvider>
+            {children}
+          </StatLabProvider>
+        </AuthProvider>
       </body>
     </html>
   )

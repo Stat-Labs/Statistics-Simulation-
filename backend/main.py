@@ -8,6 +8,13 @@ Or from project root:
     python -m uvicorn backend.main:app --reload --port 8000
 """
 
+import os
+import sys
+
+# Make `models` / `stats` importable regardless of the working directory
+# (the app is launched as `backend.main:app` from the repo root).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import json
@@ -33,6 +40,24 @@ from stats.cleaning import (
     handle_outliers, standardize_categoricals, standardize_states,
     parse_dates, fix_typos, remove_exact_duplicates, remove_fuzzy_duplicates,
 )
+from stats.chunked_reader import ChunkedCsvReader
+from stats.profile import compute_streaming_profile
+from planner import plan_execution
+from verify import content_hash, ENGINE_VERSION, verify_profile
+from cache import ProfileCache
+from jobs import JobManager
+from models import (
+    ExecutionInfo,
+    StreamProfileResponse,
+    ReproducibilityManifest,
+    VerificationReport,
+    JobResponse,
+)
+from vie.dashboard import build_dashboard
+from vie.models import VisualizationResponse
+
+_profile_cache = ProfileCache()
+_job_manager = JobManager(max_workers=1)
 
 app = FastAPI(title="StatLab Analysis API", version="1.0.0")
 
@@ -120,59 +145,67 @@ def _generate_chart_suggestions(
     return suggestions
 
 
-@app.post("/analyse")
-async def analyse(
-    file: UploadFile = File(...),
-    analyses: str = Form(...),
-    strategies: str = Form(None),
-    codebook: str = Form(None),
-    preprocessing: str = Form(None),
-    feature_engineering: str = Form(None),
-    model_training: str = Form(None),
-) -> AnalyseResponse:
+def _run_analyse_sync(
+    contents: bytes,
+    filename: str,
+    analyses: str,
+    strategies: str | None,
+    codebook: str | None,
+    preprocessing: str | None,
+    feature_engineering: str | None,
+    model_training: str | None,
+    report=None,
+) -> dict:
+    """Shared /analyse logic. `report(progress, stage, message)` (optional) is
+    invoked at stage boundaries for background-job progress. Returns the
+    AnalyseResponse dict (aliases applied, so the payload uses `schema`)."""
+    if report:
+        report(0.05, "parsing configuration")
+
     try:
         analyses_data: dict = json.loads(analyses)
     except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid analyses JSON")
+        raise ValueError("Invalid analyses JSON")
 
     strategies_data: dict | None = None
     if strategies:
         try:
             strategies_data = json.loads(strategies)
         except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid strategies JSON")
+            raise ValueError("Invalid strategies JSON")
 
     codebook_data: dict | None = None
     if codebook:
         try:
             codebook_data = json.loads(codebook)
         except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid codebook JSON")
+            raise ValueError("Invalid codebook JSON")
 
     preproc_config: PreprocessingConfig | None = None
     if preprocessing:
         try:
             preproc_config = PreprocessingConfig(**json.loads(preprocessing))
         except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid preprocessing JSON")
+            raise ValueError("Invalid preprocessing JSON")
 
     fe_config: FeatureEngineeringConfig | None = None
     if feature_engineering:
         try:
             fe_config = FeatureEngineeringConfig(**json.loads(feature_engineering))
         except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid feature engineering JSON")
+            raise ValueError("Invalid feature engineering JSON")
 
     mt_config: ModelTrainingConfig | None = None
     if model_training:
         try:
             mt_config = ModelTrainingConfig(**json.loads(model_training))
         except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid model training JSON")
+            raise ValueError("Invalid model training JSON")
 
     # Parse CSV / Excel
-    contents = await file.read()
-    schema, df, missing_report = parse_file(contents, file.filename or "uploaded.csv")
+    if report:
+        report(0.2, "loading dataset")
+    schema, df, missing_report = parse_file(contents, filename)
 
     # Attach human-readable labels to coded columns (optional but recommended).
     if codebook_data:
@@ -252,6 +285,8 @@ async def analyse(
     # Descriptive
     desc_config = analyses_data.get("descriptive")
     if desc_config:
+        if report:
+            report(0.55, "descriptive statistics")
         desc_cols = desc_config.get("columns", [])
         # Flatten if nested: [["a","b"]] -> ["a","b"]
         desc_cols = [c for col in desc_cols for c in (col if isinstance(col, list) else [col])]
@@ -261,6 +296,8 @@ async def analyse(
     # Inferential
     inf_config = analyses_data.get("inferential")
     if inf_config:
+        if report:
+            report(0.7, "inferential statistics")
         from models import InferentialResult
         inf_result = InferentialResult()
 
@@ -287,6 +324,8 @@ async def analyse(
     pred_result = None
     fe_report = None
     if pred_config:
+        if report:
+            report(0.85, "predictive modeling")
         dep = pred_config["dependent"]
         preds = pred_config.get("predictors", [])
         mt_override = pred_config.get("modelType")
@@ -300,12 +339,11 @@ async def analyse(
     # Model training / tuning / evaluation (optional)
     model_training_report = None
     if mt_config and mt_config.enabled:
+        if report:
+            report(0.95, "model training")
         pred_cfg = analyses_data.get("predictive")
         if not pred_cfg:
-            raise HTTPException(
-                status_code=400,
-                detail="Model training requires a 'predictive' configuration to define target/predictors.",
-            )
+            raise ValueError("Model training requires a 'predictive' configuration to define target/predictors.")
         mt_dep = pred_cfg["dependent"]
         mt_preds = pred_cfg.get("predictors", [])
 
@@ -322,6 +360,23 @@ async def analyse(
         result.descriptive, result.inferential, pred_result,
     )
 
+    # Execution-plan metadata (informational; /analyse materializes for cleaning/charts)
+    plan = plan_execution(
+        len(contents),
+        len(df),
+        len(df.columns),
+        bytes_per_row=len(contents) / max(len(df), 1),
+        requested={
+            "model_training": bool(mt_config and mt_config.enabled),
+            "feature_engineering": bool(fe_config),
+            "predictive": bool(analyses_data.get("predictive")),
+        },
+        force_materialize=True,
+    )
+
+    if report:
+        report(1.0, "done")
+
     return AnalyseResponse(
         success=True,
         result=result,
@@ -330,9 +385,380 @@ async def analyse(
         cleaningReport=cleaning_report,
         featureEngineeringReport=fe_report,
         modelTrainingReport=model_training_report,
+        execution=ExecutionInfo(**plan.to_dict()),
+    ).model_dump(by_alias=True)
+
+
+@app.post("/analyse")
+async def analyse(
+    file: UploadFile = File(...),
+    analyses: str = Form(...),
+    strategies: str = Form(None),
+    codebook: str = Form(None),
+    preprocessing: str = Form(None),
+    feature_engineering: str = Form(None),
+    model_training: str = Form(None),
+) -> AnalyseResponse:
+    try:
+        contents = await file.read()
+        return AnalyseResponse(**_run_analyse_sync(
+            contents,
+            file.filename or "uploaded.csv",
+            analyses,
+            strategies,
+            codebook,
+            preprocessing,
+            feature_engineering,
+            model_training,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+def _run_profile_sync(
+    contents: bytes,
+    filename: str,
+    chunk_size: str | None,
+    nbins: str,
+    top_frequency: str,
+    correlations: str | None,
+    verify: str,
+    cache: str,
+    report=None,
+) -> dict:
+    """Shared /profile logic. `report(progress, stage, message)` (optional) is
+    invoked so a background job can surface progress. Returns the response dict."""
+    file_hash = content_hash(contents)
+    reader = ChunkedCsvReader(contents, filename)
+
+    cs = int(chunk_size) if chunk_size else None
+    nb = int(nbins)
+    top = int(top_frequency)
+
+    corr_pairs: list[tuple[str, str]] | None = None
+    if correlations:
+        try:
+            raw = json.loads(correlations)
+            corr_pairs = [(p[0], p[1]) for p in raw]
+        except (json.JSONDecodeError, IndexError, TypeError, KeyError):
+            raise ValueError("Invalid correlations JSON")
+
+    run_verify = verify.lower() in ("1", "true", "yes")
+    use_cache = cache.lower() in ("1", "true", "yes") and not run_verify
+    key_suffix = (nb, top, tuple(corr_pairs or []), reader.filename)
+    cache_key = (file_hash, cs) + key_suffix
+    if use_cache:
+        cached = _profile_cache.get(cache_key)
+        if cached is not None:
+            cached["cacheHit"] = True
+            if report:
+                report(1.0, "done", "served from cache")
+            return cached
+
+    try:
+        sniff = reader.sniff()
+    except ValueError as exc:
+        raise ValueError(str(exc))
+
+    plan = plan_execution(
+        len(contents),
+        sniff.row_count,
+        len(sniff.columns),
+        bytes_per_row=sniff.bytes_per_row(),
+        requested={"profile": True},
+    )
+    if cs is None:
+        cs = plan.chunk_size
+
+    import time
+    t0 = time.time()
+    try:
+        prof = compute_streaming_profile(
+            reader,
+            chunk_size=cs,
+            nbins=nb,
+            top_frequency=top,
+            correlations=corr_pairs,
+            progress_cb=report,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise RuntimeError(f"Streaming profile failed: {exc}")
+    elapsed = time.time() - t0
+
+    if prof.get("error"):
+        return StreamProfileResponse(
+            success=False,
+            fileName=reader.filename,
+            rowCount=0,
+            columnCount=0,
+            columns=[],
+            sampleRows=[],
+            totalMissing=0,
+            error=prof["error"],
+            execution=ExecutionInfo(**plan.to_dict()),
+        ).model_dump()
+
+    manifest = ReproducibilityManifest(
+        fileHash=file_hash,
+        engineVersion=ENGINE_VERSION,
+        strategy=plan.strategy,
+        rowCount=prof["rowCount"],
+        columnCount=prof["columnCount"],
+        chunkSize=cs,
+        passes=2,
+        elapsedSeconds=round(elapsed, 3),
+        options={"nbins": nb, "topFrequency": top, "correlations": corr_pairs},
     )
 
+    verification: VerificationReport | None = None
+    if run_verify:
+        if report:
+            report(0.9, "verifying")
+        raw_verify = verify_profile(
+            contents,
+            reader.filename,
+            prof,
+            chunk_size=cs,
+            nbins=nb,
+            top_frequency=top,
+            correlations=corr_pairs,
+        )
+        verification = VerificationReport(**raw_verify)
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+    response = StreamProfileResponse(
+        success=True,
+        execution=ExecutionInfo(**plan.to_dict()),
+        fileName=prof["fileName"],
+        rowCount=prof["rowCount"],
+        columnCount=prof["columnCount"],
+        columns=prof["columns"],
+        sampleRows=prof["sampleRows"],
+        duplicateRowCount=prof["duplicateRowCount"],
+        duplicateCountCapped=prof["duplicateCountCapped"],
+        totalMissing=prof["totalMissing"],
+        correlations=prof["correlations"],
+        manifest=manifest,
+        verification=verification,
+        cacheHit=False,
+    )
+    dumped = response.model_dump()
+    if use_cache:
+        # Store under the exact key used on lookup (cs=None sentinel) AND the
+        # effective key, so either the default or the resolved chunk size hits.
+        _profile_cache.put(cache_key, dumped)
+        if cs is not None:
+            _profile_cache.put((file_hash, cs) + key_suffix, dumped)
+    return dumped
+
+
+def _run_visualize_sync(
+    contents: bytes,
+    filename: str,
+    chunk_size: str | None,
+    nbins: str,
+    top_frequency: str,
+    correlations: str | None,
+    verify: str,
+    cache: str,
+    user_preferences: str | None = None,
+) -> dict:
+    """Visualization Intelligence Engine core.
+
+    Profiles the file (cached, like /profile), requests correlation pairs
+    automatically from a quick sniff when none were supplied, then runs the
+    deterministic VIE pipeline: detection -> intents -> scoring -> ECharts spec
+    generation -> verification. Returns a VisualizationResponse dict.
+    """
+    corr_arg = correlations
+    dtypes: dict[str, str] | None = None
+    if not corr_arg:
+        reader = ChunkedCsvReader(contents, filename)
+        sniff = reader.sniff()
+        dtypes = {
+            c.name: ("float64" if sniff.dtype_map[c.name] in ("int", "float") else "object")
+            for c in sniff.columns
+        }
+        numeric = [c.name for c in sniff.columns
+                   if c.total > 0 and c.float_ok == c.total][:10]
+        pairs = [(a, b) for i, a in enumerate(numeric) for b in numeric[i + 1:]]
+        corr_arg = json.dumps(pairs) if pairs else None
+
+    profile = _run_profile_sync(
+        contents, filename, chunk_size, nbins, top_frequency, corr_arg, verify, cache,
+    )
+    if not profile.get("success"):
+        return {
+            "success": False,
+            "fileName": filename,
+            "rowCount": 0,
+            "columnCount": 0,
+            "error": profile.get("error"),
+        }
+
+    user_prefs_dict = None
+    if user_preferences:
+        try:
+            user_prefs_dict = json.loads(user_preferences)
+        except Exception:
+            pass
+
+    return build_dashboard(profile, contents, dtypes, user_preferences=user_prefs_dict)
+
+
+@app.post("/profile")
+async def profile(
+    file: UploadFile = File(...),
+    chunk_size: str = Form(None),
+    nbins: str = Form("20"),
+    top_frequency: str = Form("10"),
+    correlations: str = Form(None),
+    verify: str = Form("false"),
+    cache: str = Form("true"),
+) -> StreamProfileResponse:
+    """Full-population streaming dataset profile (near-constant memory).
+
+    Reads the file in two bounded passes and computes descriptive statistics,
+    percentiles, histograms, frequency tables, cardinalities, row duplicates,
+    and (optionally) pairwise correlations — without ever materializing the
+    whole dataset. Attaches the execution plan, a reproducibility manifest, and
+    (when `verify=true`) a verification report. Identical requests are served
+    from an in-process cache unless `cache=false`. For long files, POST to
+    `/jobs/profile` instead and poll `/jobs/{id}`.
+    """
+    contents = await file.read()
+    try:
+        return StreamProfileResponse(**_run_profile_sync(
+            contents,
+            file.filename or "uploaded.csv",
+            chunk_size,
+            nbins,
+            top_frequency,
+            correlations,
+            verify,
+            cache,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/visualize")
+async def visualize(
+    file: UploadFile = File(...),
+    chunk_size: str = Form(None),
+    nbins: str = Form("20"),
+    top_frequency: str = Form("10"),
+    correlations: str = Form(None),
+    verify: str = Form("false"),
+    cache: str = Form("true"),
+    user_preferences: str = Form(None),
+) -> VisualizationResponse:
+    """Visualization Intelligence Engine dashboard.
+
+    Profiles the file (same cached streaming profile as /profile), then runs
+    the deterministic VIE pipeline and returns a multi-chart dashboard of
+    self-contained Apache ECharts JSON specs, each with a confidence score,
+    reasoning, alternatives, and a verification report. The LLM never decides
+    the charts.
+    """
+    contents = await file.read()
+    try:
+        return VisualizationResponse(**_run_visualize_sync(
+            contents,
+            file.filename or "uploaded.csv",
+            chunk_size,
+            nbins,
+            top_frequency,
+            correlations,
+            verify,
+            cache,
+            user_preferences,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Background jobs (Render Free: single worker, so one job at a time; the queue
+# keeps HTTP endpoints responsive and the frontend polls for progress).
+# ---------------------------------------------------------------------------
+
+
+@app.post("/jobs/profile")
+async def create_profile_job(
+    file: UploadFile = File(...),
+    chunk_size: str = Form(None),
+    nbins: str = Form("20"),
+    top_frequency: str = Form("10"),
+    correlations: str = Form(None),
+    verify: str = Form("false"),
+    cache: str = Form("true"),
+) -> JobResponse:
+    """Submit a streaming profile to the background worker. Returns immediately
+    with a jobId; poll `GET /jobs/{jobId}` for progress and the result."""
+    contents = await file.read()
+    rec = _job_manager.submit(
+        "profile",
+        lambda report: _run_profile_sync(
+            contents,
+            file.filename or "uploaded.csv",
+            chunk_size,
+            nbins,
+            top_frequency,
+            correlations,
+            verify,
+            cache,
+            report,
+        ),
+    )
+    return JobResponse(**rec.to_dict(include_result=False))
+
+
+@app.post("/jobs/analyse")
+async def create_analyse_job(
+    file: UploadFile = File(...),
+    analyses: str = Form(...),
+    strategies: str = Form(None),
+    codebook: str = Form(None),
+    preprocessing: str = Form(None),
+    feature_engineering: str = Form(None),
+    model_training: str = Form(None),
+) -> JobResponse:
+    """Submit a full analysis to the background worker. Returns immediately
+    with a jobId; poll `GET /jobs/{jobId}` for progress and the result."""
+    contents = await file.read()
+    rec = _job_manager.submit(
+        "analyse",
+        lambda report: _run_analyse_sync(
+            contents,
+            file.filename or "uploaded.csv",
+            analyses,
+            strategies,
+            codebook,
+            preprocessing,
+            feature_engineering,
+            model_training,
+            report,
+        ),
+    )
+    return JobResponse(**rec.to_dict(include_result=False))
+
+
+@app.get("/jobs")
+async def list_jobs() -> list[JobResponse]:
+    """List recent jobs (status/progress only, newest last)."""
+    return [JobResponse(**d) for d in _job_manager.list_jobs()]
+
+
+@app.get("/jobs/{job_id}")
+async def get_job(job_id: str) -> JobResponse:
+    """Poll a job. `result` is present only once the job has succeeded."""
+    data = _job_manager.get(job_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobResponse(**data)

@@ -11,6 +11,8 @@ import type {
   ModelType,
 } from '@/lib/types'
 import { uncertainCodeColumns, applyCodeDetection } from '@/lib/utils/labels'
+import { ChunkedUploader, type UploadProgress } from '@/lib/upload/chunker'
+import { computeKpiSeries } from '@/lib/memory/client'
 
 export type AnalysisMode = 'smart' | 'manual'
 
@@ -31,6 +33,9 @@ export interface AnalysisSession {
   interpret: InterpretResult
   relationshipSuggestions?: RelationshipSuggestion[]
   modelTrainingReport?: Record<string, unknown> | null
+  datasetId?: string
+  analysisId?: string
+  savedAt?: number
 }
 
 export type PipelineStatus =
@@ -41,6 +46,13 @@ export type PipelineStatus =
   | 'interpreting'
   | 'done'
   | 'error'
+
+export interface MemoryProgress {
+  stage: 'dataset' | 'analysis' | 'knowledge'
+  status: 'uploading' | 'verifying' | 'saving' | 'extracting' | 'done' | 'error'
+  percent?: number
+  error?: string
+}
 
 const HISTORY_KEY = 'statlab_history'
 
@@ -65,8 +77,12 @@ export function useStatLab() {
   const [codebook, setCodebook] = useState<Record<string, Record<string, string>> | null>(null)
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>('idle')
   const [pipelineError, setPipelineError] = useState<string | null>(null)
+  const [memoryProgress, setMemoryProgress] = useState<MemoryProgress | null>(null)
   const [currentSession, setCurrentSession] = useState<AnalysisSession | null>(null)
   const [history, setHistory] = useState<AnalysisSession[]>([])
+  // Dataset stored at selection time via the chunked upload pipeline. Reused by
+  // `persistToMemory` so the file is never uploaded twice.
+  const [uploadedDatasetId, setUploadedDatasetId] = useState<string | null>(null)
 
   useEffect(() => {
     setHistory(loadHistory())
@@ -92,6 +108,108 @@ export function useStatLab() {
       return next
     })
   }, [])
+
+  /**
+   * Saves a completed analysis to the user's workspace memory:
+   *
+   *   1. Dataset → chunked upload (2 MB slices, pause/resume/resume-safe) to
+   *      object storage; metadata row is created on completion.
+   *   2. Analysis result JSON → stored with trimmed schema metadata.
+   *   3. Knowledge extraction → findings/glossary/KPIs/embeddings.
+   *
+   * Fire-and-forget — never blocks or breaks the analysis flow. Progress is
+   * reported through `memoryProgress` so the UI can show each stage.
+   */
+  const persistToMemory = useCallback(async (session: AnalysisSession, csvFile: File) => {
+    if (typeof window === 'undefined') return
+    try {
+      // 1. Reuse the dataset uploaded at selection time when available; the
+      //    chunked pipeline is the fallback (e.g. analysis without an upload).
+      let datasetId = uploadedDatasetId
+      if (datasetId) {
+        setMemoryProgress({ stage: 'dataset', status: 'done', percent: 1 })
+      } else {
+        setMemoryProgress({ stage: 'dataset', status: 'uploading' })
+        const uploader = new ChunkedUploader(csvFile)
+        const uploaded = await uploader.run((p: UploadProgress) => {
+          setMemoryProgress({
+            stage: 'dataset',
+            status: p.stage === 'verifying' ? 'verifying' : 'uploading',
+            percent: p.percent,
+            error: p.error,
+          })
+        })
+        datasetId = uploaded.datasetId
+      }
+
+      // 2. Store the analysis result (trimmed schema — no full data payload).
+      setMemoryProgress({ stage: 'analysis', status: 'saving' })
+      const trimmedSchema = lightweightSchema(session.schema)
+      const payload = {
+        result: session.result,
+        chartSuggestions: session.chartSuggestions ?? [],
+        interpret: session.interpret,
+        relationshipSuggestions: session.relationshipSuggestions ?? [],
+        modelTrainingReport: session.modelTrainingReport ?? null,
+      }
+      const analysisForm = new FormData()
+      analysisForm.append('datasetId', datasetId)
+      analysisForm.append('name', `${session.fileName} analysis`)
+      analysisForm.append('schema', JSON.stringify(trimmedSchema))
+      analysisForm.append('summary', session.interpret?.summary ?? '')
+      analysisForm.append('providerUsed', session.interpret?.provider ?? '')
+      analysisForm.append('modelType', session.result?.predictive?.modelType ?? '')
+      analysisForm.append(
+        'result',
+        new Blob([JSON.stringify(payload)], { type: 'application/json' }),
+        'result.json',
+      )
+      const analysisRes = await fetch('/api/analyses', {
+        method: 'POST',
+        body: analysisForm,
+        credentials: 'same-origin',
+      })
+      if (analysisRes.status === 401) return
+      const analysisData = await analysisRes.json()
+      if (!analysisData?.success) return
+      const analysisId = analysisData.analysis.id
+
+      // 3. Extract structured knowledge (findings, glossary, KPIs, embeddings).
+      setMemoryProgress({ stage: 'knowledge', status: 'extracting' })
+      const kpis = computeKpiSeries(session.schema)
+      const extractRes = await fetch('/api/memory/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ analysisId, kpis }),
+        credentials: 'same-origin',
+      })
+      if (extractRes.ok) {
+        const extractData = await extractRes.json()
+        setMemoryProgress({
+          stage: 'knowledge',
+          status: 'done',
+          percent: 1,
+          error: extractData?.success ? undefined : (extractData?.error ?? 'Knowledge extraction incomplete'),
+        })
+      }
+
+      const savedSession: AnalysisSession = {
+        ...session,
+        datasetId,
+        analysisId,
+        savedAt: Date.now(),
+      }
+      setCurrentSession(savedSession)
+      pushToHistory(savedSession)
+    } catch (err) {
+      setMemoryProgress({
+        stage: 'dataset',
+        status: 'error',
+        error: err instanceof Error ? err.message : 'Could not save to memory',
+      })
+      // Memory persistence must never break the analysis flow.
+    }
+  }, [pushToHistory, setCurrentSession, lightweightSchema, uploadedDatasetId])
 
   // Optional AI inspection of columns the code-detection heuristics were unsure
   // about. Runs only when there are uncertain columns; never blocks on failure.
@@ -241,8 +359,9 @@ export function useStatLab() {
     pushToHistory(session)
     setCurrentSession(session)
     setPipelineStatus('done')
+    void persistToMemory(session, csvFile)
     return session
-  }, [pushToHistory, resolveUncertainCodes, lightweightSchema])
+  }, [pushToHistory, resolveUncertainCodes, lightweightSchema, persistToMemory])
 
   const runManualPipeline = useCallback(async (csvFile: File, csvSchema: DatasetSchema, analyses: AnalysisRequest, codebook?: Record<string, Record<string, string>>, modelTraining?: Record<string, unknown>) => {
     setPipelineStatus('analysing')
@@ -277,8 +396,9 @@ export function useStatLab() {
     pushToHistory(session)
     setCurrentSession(session)
     setPipelineStatus('done')
+    void persistToMemory(session, csvFile)
     return session
-  }, [pushToHistory, resolveUncertainCodes])
+  }, [pushToHistory, resolveUncertainCodes, persistToMemory])
 
   const runPredictiveModel = useCallback(async (
     csvFile: File, csvSchema: DatasetSchema, dependent: string, predictors: string[], modelType?: string
@@ -335,7 +455,9 @@ export function useStatLab() {
     setCodebook(null)
     setPipelineStatus('idle')
     setPipelineError(null)
+    setMemoryProgress(null)
     setCurrentSession(null)
+    setUploadedDatasetId(null)
   }, [])
 
   return {
@@ -345,11 +467,15 @@ export function useStatLab() {
     manualRequest, setManualRequest,
     codebook, setCodebook,
     pipelineStatus, pipelineError,
+    setPipelineStatus, setPipelineError,
+    memoryProgress,
     currentSession,
     history,
+    uploadedDatasetId, setUploadedDatasetId,
     submit,
     loadSession,
     reset,
     runPredictiveModel,
+    persistToMemory,
   }
 }
