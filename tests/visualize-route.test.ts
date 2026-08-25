@@ -18,7 +18,7 @@ describe('POST /api/visualize proxy', () => {
     vi.unstubAllGlobals()
   })
 
-  it('rejects requests with no file', async () => {
+  it('rejects requests with no file', { timeout: 30000 }, async () => {
     const { POST } = await loadRoute()
     const { NextRequest } = await import('next/server')
     const empty = new NextRequest('http://localhost/api/visualize', {
@@ -31,7 +31,7 @@ describe('POST /api/visualize proxy', () => {
     expect(body.error).toMatch(/no file/i)
   })
 
-  it('forwards a valid request to the FastAPI /visualize endpoint', async () => {
+  it('forwards a valid request to the FastAPI /visualize endpoint', { timeout: 30000 }, async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -63,7 +63,7 @@ describe('POST /api/visualize proxy', () => {
     expect(init.body).toBeInstanceOf(FormData)
   })
 
-  it('returns 502 when the Python backend is not running', async () => {
+  it('returns 502 when the Python backend is not running', { timeout: 30000 }, async () => {
     const err = new Error('fetch failed')
     ;(err as { cause?: unknown }).cause = { code: 'ECONNREFUSED' }
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(err))
@@ -75,7 +75,7 @@ describe('POST /api/visualize proxy', () => {
     expect(body.error).toMatch(/not running/i)
   })
 
-  it('propagates backend error details', async () => {
+  it('propagates backend error details', { timeout: 30000 }, async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({

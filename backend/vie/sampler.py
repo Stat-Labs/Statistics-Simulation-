@@ -77,7 +77,7 @@ def date_buckets(csv_bytes: bytes, date_name: str,
     rows = sample_rows(csv_bytes, [date_name], dtypes=dtypes, max_points=max_points)
     if not rows:
         return []
-    parsed = pd.to_datetime([r.get(date_name) for r in rows], errors="coerce")
+    parsed = pd.Series(pd.to_datetime([r.get(date_name) for r in rows], errors="coerce"))
     parsed = parsed.dropna()
     if parsed.empty:
         return []

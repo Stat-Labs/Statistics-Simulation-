@@ -69,14 +69,20 @@ export default function DashboardPage() {
   const [inviteMessage, setInviteMessage] = useState<string | null>(null)
   const [inviteError, setInviteError] = useState<string | null>(null)
   const [inviting, setInviting] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name'>('newest')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const scope = org ? 'org' : 'personal'
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      const params = new URLSearchParams({ scope })
+      if (searchQuery) params.set('search', searchQuery)
+      if (sortBy) params.set('sort', sortBy)
       const [analysesRes, datasetsRes] = await Promise.all([
-        fetch(`/api/analyses?scope=${scope}`, { credentials: 'same-origin' }),
+        fetch(`/api/analyses?${params}`, { credentials: 'same-origin' }),
         fetch(`/api/datasets?scope=${scope}`, { credentials: 'same-origin' }),
       ])
       const [analysesData, datasetsData] = await Promise.all([analysesRes.json(), datasetsRes.json()])
@@ -88,7 +94,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false)
     }
-  }, [scope])
+  }, [scope, searchQuery, sortBy])
 
   useEffect(() => {
     void load()
@@ -136,6 +142,18 @@ export default function DashboardPage() {
       setInviteError('Network error. Try again.')
     } finally {
       setInviting(false)
+    }
+  }
+
+  async function deleteAnalysis(id: string) {
+    setDeletingId(id)
+    try {
+      const res = await fetch(`/api/analyses/${id}`, { method: 'DELETE', credentials: 'same-origin' })
+      if (res.ok) setAnalyses((prev) => prev.filter((a) => a.id !== id))
+    } catch {
+      // Best-effort.
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -285,6 +303,26 @@ export default function DashboardPage() {
             <h2 className="text-sm font-semibold">Recent analyses</h2>
             <span className="text-[11px] text-zinc-500">{analyses.length} saved</span>
           </div>
+          {/* Search + Sort */}
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              placeholder="Search analyses…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void load() }}
+              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-900/40"
+            />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500"
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name">By name</option>
+            </select>
+          </div>
           {loading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[0, 1].map((i) => (
@@ -305,40 +343,58 @@ export default function DashboardPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {analyses.map((a) => (
-                <Link
+                <div
                   key={a.id}
-                  href={`/analyse?id=${a.id}`}
-                  className="group rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 hover:border-emerald-500/40 hover:bg-zinc-900/70 transition-colors"
+                  className="group relative rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 hover:border-emerald-500/40 hover:bg-zinc-900/70 transition-colors"
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-zinc-100 truncate group-hover:text-white">
-                      {a.name}
+                  <Link href={`/analyse?id=${a.id}`} className="block">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold text-zinc-100 truncate group-hover:text-white">
+                        {a.name}
+                      </div>
+                      <span className="text-[11px] text-zinc-500 shrink-0">{formatDate(a.createdAt)}</span>
                     </div>
-                    <span className="text-[11px] text-zinc-500 shrink-0">{formatDate(a.createdAt)}</span>
-                  </div>
-                  {a.summary && (
-                    <p className="mt-1.5 text-xs text-zinc-400 leading-relaxed line-clamp-2">
-                      {a.summary}
-                    </p>
-                  )}
-                  <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-                    {a.modelType && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-emerald-300">
-                        {a.modelType}
-                      </span>
+                    {a.summary && (
+                      <p className="mt-1.5 text-xs text-zinc-400 leading-relaxed line-clamp-2">
+                        {a.summary}
+                      </p>
                     )}
-                    {a.providerUsed && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
-                        {a.providerUsed}
-                      </span>
+                    <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+                      {a.modelType && (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-emerald-300">
+                          {a.modelType}
+                        </span>
+                      )}
+                      {a.providerUsed && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                          {a.providerUsed}
+                        </span>
+                      )}
+                      {a.rowCount != null && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                          {a.rowCount.toLocaleString()} rows
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault()
+                      if (confirm('Delete this analysis?')) void deleteAnalysis(a.id)
+                    }}
+                    disabled={deletingId === a.id}
+                    className="absolute top-3 right-3 p-1 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-950/40 opacity-0 group-hover:opacity-100 transition-all disabled:opacity-40"
+                    title="Delete analysis"
+                  >
+                    {deletingId === a.id ? (
+                      <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
                     )}
-                    {a.rowCount != null && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
-                        {a.rowCount.toLocaleString()} rows
-                      </span>
-                    )}
-                  </div>
-                </Link>
+                  </button>
+                </div>
               ))}
             </div>
           )}

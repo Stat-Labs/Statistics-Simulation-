@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { getDb } from '@/db/client'
 import { analyses, datasets } from '@/db/schema'
-import { and, eq, isNull, desc } from 'drizzle-orm'
+import { and, eq, isNull, desc, sql } from 'drizzle-orm'
 import { getSession } from '@/lib/auth/session'
 import { getStorage } from '@/lib/storage'
 import { jsonify } from '@/db/table'
@@ -14,11 +14,26 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = request.nextUrl
   const scope = searchParams.get('scope')
+  const search = searchParams.get('search')?.trim() ?? ''
+  const sortBy = searchParams.get('sort') ?? 'newest'
+  const limit = Math.min(Math.max(parseInt(searchParams.get('limit') ?? '100', 10) || 100, 1), 200)
   const db = await getDb()
 
   const conditions = scope === 'org' && session.org
     ? [eq(analyses.ownerId, session.user.id), eq(analyses.orgId, session.org.id)]
     : [eq(analyses.ownerId, session.user.id), isNull(analyses.orgId)]
+
+  if (search) {
+    conditions.push(
+      sql`(${analyses.name} LIKE ${'%' + search + '%'} OR ${analyses.summary} LIKE ${'%' + search + '%'} OR ${analyses.modelType} LIKE ${'%' + search + '%'})`,
+    )
+  }
+
+  const orderBy = sortBy === 'oldest'
+    ? sql`${analyses.createdAt} asc`
+    : sortBy === 'name'
+      ? sql`${analyses.name} asc`
+      : desc(analyses.createdAt)
 
   const rows = await db
     .select({
@@ -35,8 +50,8 @@ export async function GET(request: NextRequest) {
     .from(analyses)
     .leftJoin(datasets, eq(datasets.id, analyses.datasetId))
     .where(and(...conditions))
-    .orderBy(desc(analyses.createdAt))
-    .limit(100)
+    .orderBy(orderBy)
+    .limit(limit)
 
   return ok({ analyses: rows })
 }
