@@ -317,4 +317,117 @@ class AnalyseResponse(BaseModel):
     cleaningReport: Optional[CleaningReport] = None
     featureEngineeringReport: Optional[FeatureEngineeringReport] = None
     modelTrainingReport: Optional[ModelTrainingReport] = None
+    execution: Optional["ExecutionInfo"] = None
+    error: Optional[str] = None
+
+
+class ExecutionStage(BaseModel):
+    name: str
+    mode: str  # "streaming" | "in_memory" | "hybrid"
+    cacheable: bool = False
+    cost: str = "low"  # "low" | "medium" | "high"
+
+
+class ExecutionInfo(BaseModel):
+    """Execution-plan metadata attached to analysis/profile responses."""
+    strategy: str  # "streaming" | "in_memory" | "hybrid"
+    rowCount: Optional[int] = None
+    columnCount: Optional[int] = None
+    chunkSize: Optional[int] = None
+    fileSizeBytes: Optional[int] = None
+    availableMemoryBytes: Optional[int] = None
+    estimatedMemoryBytes: Optional[int] = None
+    estimatedRuntimeSeconds: Optional[float] = None
+    stages: list[ExecutionStage] = []
+    notes: list[str] = []
+
+
+class ProfileColumn(BaseModel):
+    """Per-column streaming profile entry (mirrors Column + descriptive stats)."""
+    name: str
+    type: ColumnType
+    coded: Optional[bool] = None
+    codeNote: Optional[str] = None
+    codeUncertain: Optional[bool] = None
+    uniqueValues: Optional[list[str | int | float]] = None
+    count: int
+    nullCount: int
+    nullPercentage: float
+    suggestedStrategy: str
+    cardinality: Optional[int] = None
+    cardinalityCapped: Optional[bool] = None
+    sampleValues: Optional[list[Any]] = None
+    mean: Optional[float] = None
+    median: Optional[float] = None
+    mode: Optional[Any] = None
+    stdDev: Optional[float] = None
+    variance: Optional[float] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    range: Optional[float] = None
+    iqr: Optional[float] = None
+    skewness: Optional[float] = None
+    kurtosis: Optional[float] = None
+    outlierCount: Optional[int] = None
+    quantiles: Optional[dict[str, float]] = None
+    histogram: Optional[dict] = None
+    frequencyTable: Optional[dict[str, int]] = None
+    frequencyCapped: Optional[bool] = None
+
+
+class StreamProfileResponse(BaseModel):
+    success: bool
+    execution: Optional[ExecutionInfo] = None
+    fileName: str
+    rowCount: int
+    columnCount: int
+    columns: list[ProfileColumn]
+    sampleRows: list[dict[str, Any]]
+    duplicateRowCount: Optional[int] = None
+    duplicateCountCapped: bool = False
+    totalMissing: int
+    correlations: Optional[list[dict]] = None
+    manifest: Optional["ReproducibilityManifest"] = None
+    verification: Optional["VerificationReport"] = None
+    cacheHit: Optional[bool] = None
+    error: Optional[str] = None
+
+
+class ReproducibilityManifest(BaseModel):
+    """Audit trail attached to every profile so results can be reproduced."""
+    fileHash: str
+    engineVersion: str
+    strategy: str
+    rowCount: int
+    columnCount: int
+    chunkSize: int
+    passes: int = 2
+    elapsedSeconds: float
+    options: dict[str, Any] = {}
+
+
+class VerificationReport(BaseModel):
+    passed: bool
+    engineVersion: str
+    exactness: list[dict] = []
+    exactnessOk: bool = True
+    consistency: list[str] = []
+    consistencyOk: bool = True
+    determinism: bool = True
+    fullCrossCheck: Optional[dict] = None
+    notes: list[str] = []
+
+
+class JobResponse(BaseModel):
+    """Async job submission/status payload for the background worker."""
+    jobId: str
+    kind: str  # "profile" | "analyse"
+    status: str  # "queued" | "running" | "succeeded" | "failed"
+    progress: float = 0.0
+    stage: str = ""
+    message: Optional[str] = None
+    createdAt: float
+    startedAt: Optional[float] = None
+    finishedAt: Optional[float] = None
+    result: Optional[Any] = None
     error: Optional[str] = None

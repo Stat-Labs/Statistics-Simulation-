@@ -50,6 +50,21 @@ export async function POST(request: NextRequest) {
       proxyForm.append('codebook', codebookRaw)
     }
 
+    const modelTrainingRaw = formData.get('model_training')
+    if (modelTrainingRaw && typeof modelTrainingRaw === 'string') {
+      proxyForm.append('model_training', modelTrainingRaw)
+    }
+
+    const preprocessingRaw = formData.get('preprocessing')
+    if (preprocessingRaw && typeof preprocessingRaw === 'string') {
+      proxyForm.append('preprocessing', preprocessingRaw)
+    }
+
+    const featureEngineeringRaw = formData.get('feature_engineering')
+    if (featureEngineeringRaw && typeof featureEngineeringRaw === 'string') {
+      proxyForm.append('feature_engineering', featureEngineeringRaw)
+    }
+
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 180000)
 

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { runProfiler } from '@/lib/ai/profilerPrompt'
 import { validateSchema } from '@/lib/utils/validation'
 import { rateLimit, getRateLimitIdentifier } from '@/lib/utils/rateLimit'
+import { getSession } from '@/lib/auth/session'
+import { getPreferredProvider } from '@/lib/ai/resolve'
 import type { ProfileRequestBody, ProfilerOutput, Column } from '@/lib/types'
 
 /**
@@ -34,8 +36,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: schemaError }, { status: 400 })
     }
 
-    // Run the Gemini/AI call
-    const output = await runProfiler(body.schema)
+    // Resolve BYOK-aware AI context from the session (falls back to platform keys).
+    const session = await getSession(request)
+    const preferredProvider = await getPreferredProvider(session?.user.id)
+    const ctx = {
+      userId: session?.user.id,
+      orgId: session?.org?.id ?? null,
+      preferredProvider,
+    }
+
+    // Run the AI profiler with the user's key chain
+    const output = await runProfiler(body.schema, ctx)
 
     return NextResponse.json({
       success: true,

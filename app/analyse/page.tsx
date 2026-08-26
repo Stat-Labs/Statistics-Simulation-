@@ -9,6 +9,7 @@ import {
 import { usePDFExport } from '@/lib/pdf'
 import { useStatLab } from '@/components/StatLabProvider'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { StreamProfilePanel } from '@/components/StreamProfilePanel'
 import type { AnalysisSession } from '@/lib/useStatLab'
 import type { ChartSuggestion, DescriptiveResult, CorrelationResult, HypothesisResult, RegressionResult, ModelType, RelationshipSuggestion, PredictiveResult, DatasetSchema } from '@/lib/types'
 
@@ -17,16 +18,60 @@ const BIN_COUNT = 10
 
 export default function AnalysePage() {
   const router = useRouter()
-  const { currentSession, history, loadSession, runPredictiveModel, file } = useStatLab()
+  const { currentSession, history, loadSession, runPredictiveModel, file, memoryProgress } = useStatLab()
   const { isGenerating } = usePDFExport()
   const [activeSession, setActiveSession] = useState<AnalysisSession | null>(currentSession)
   const [tab, setTab] = useState<'analysis' | 'predictions'>('analysis')
   const [activeRelIndex, setActiveRelIndex] = useState(0)
   const [extraModels, setExtraModels] = useState<Record<number, PredictiveResult | null>>({})
 
+  // Restore a saved analysis from workspace memory via ?id=<analysisId>.
+  useEffect(() => {
+    const id = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('id')
+      : null
+    if (id && !currentSession) {
+      let cancelled = false
+      void (async () => {
+        try {
+          const res = await fetch(`/api/analyses/${id}`, { credentials: 'same-origin' })
+          const data = await res.json()
+          if (!cancelled && data?.success && data.analysis?.result) {
+            const a = data.analysis
+            const session: AnalysisSession = {
+              id: a.id,
+              timestamp: a.createdAt,
+              fileName: a.dataset?.fileName ?? a.name ?? 'Analysis',
+              schema: a.schema ?? { fileName: a.dataset?.fileName ?? '', rowCount: a.rowCount ?? 0, columnCount: 0, columns: [], sampleRows: [] },
+              result: a.result.result,
+              chartSuggestions: a.result.chartSuggestions ?? [],
+              interpret: a.result.interpret ?? {
+                summary: a.summary ?? '',
+                perAnalysis: [],
+                provider: a.providerUsed ?? '',
+                fallbackUsed: false,
+              },
+              relationshipSuggestions: a.result.relationshipSuggestions ?? [],
+              modelTrainingReport: a.result.modelTrainingReport ?? null,
+              datasetId: a.dataset?.id,
+              analysisId: a.id,
+              savedAt: a.createdAt,
+            }
+            loadSession(session)
+          } else if (!cancelled) {
+            router.push('/dashboard')
+          }
+        } catch {
+          if (!cancelled) router.push('/dashboard')
+        }
+      })()
+      return () => { cancelled = true }
+    }
+  }, [currentSession, loadSession, router])
+
   useEffect(() => {
     if (!currentSession && history.length === 0) {
-      router.push('/')
+      router.push('/upload')
     } else if (!activeSession && currentSession) {
       setActiveSession(currentSession)
     } else if (!activeSession && history.length > 0) {
@@ -91,7 +136,7 @@ export default function AnalysePage() {
         {/* Header */}
         <header className="border-b border-zinc-800 px-6 py-4 sticky top-0 z-30 bg-zinc-950/90 backdrop-blur-sm flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <button onClick={() => router.push('/')} className="text-zinc-500 hover:text-white transition-colors">
+            <button onClick={() => router.push('/dashboard')} className="text-zinc-500 hover:text-white transition-colors" aria-label="Back to dashboard">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
@@ -104,6 +149,14 @@ export default function AnalysePage() {
             <span className="font-semibold tracking-tight">StatLab</span>
             <span className="hidden sm:block text-zinc-600">/</span>
             <span className="hidden sm:block text-zinc-400 text-sm font-mono truncate max-w-xs">{fileName}</span>
+            {activeSession.analysisId && (
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-emerald-400 bg-emerald-950/50 border border-emerald-900/50 px-2 py-0.5 rounded-full">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Saved to memory
+              </span>
+            )}
           </div >
           <button
             onClick={handleExport}
@@ -147,11 +200,31 @@ export default function AnalysePage() {
         </div>
       </div>
 
-
+      {/* Workspace memory status — shows the background knowledge extraction */}
+      {memoryProgress && memoryProgress.status !== 'done' && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
+          <div className="rounded-lg border border-emerald-900/40 bg-emerald-950/20 px-4 py-2.5 flex items-center gap-3">
+            <div className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <p className="text-xs text-emerald-300">
+              {memoryProgress.stage === 'knowledge'
+                ? 'Extracting findings, glossary, and KPIs into workspace memory…'
+                : memoryProgress.stage === 'analysis'
+                  ? 'Storing analysis result in workspace memory…'
+                  : 'Uploading dataset to workspace storage…'}
+              {memoryProgress.percent !== undefined && (
+                <span className="ml-1.5 font-mono text-emerald-500">{Math.round(memoryProgress.percent * 100)}%</span>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-8">
         {tab === 'analysis' ? (
           <>
+            {/* Streaming full-population profile (Python backend) */}
+            <StreamProfilePanel file={file} />
+
             {/* AI Summary */}
             {interpret.summary && (
               <section id="ai-summary" className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 space-y-2">

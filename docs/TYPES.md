@@ -69,3 +69,15 @@
 - `MissingValueStrategyMap` — `Record<string, MissingValueStrategy>` mapping column names to strategies
 - `MissingValueReport` — totalMissing, byColumn (count, percentage, suggestedStrategy), requiresAttention
 - `ParsedDataset` — schema, data, missingValueReport
+
+## Visualization Intelligence Engine (VIE)
+
+- `ChartAlternative` — chartType, title, confidence, reason
+- `ChartRecommendation` — chartType, title, intent, confidence, reason, advantages, limitations, alternatives
+- `VerificationCheck` — name, ok, message
+- `ChartVerification` — passed, checks, notes
+- `DetectedPattern` — name, column, description, signal
+- `VizIntent` — id, label, description, confidence, evidence
+- `VizChart` — id, section, intent, title, chartType, recommendation, spec (ECharts option), verification
+- `VizSection` — id, title, description, charts
+- `VisualizationResponse` — success, engine, fileName, rowCount, columnCount, detectedPatterns, intents, sections, note, error

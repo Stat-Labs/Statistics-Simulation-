@@ -330,3 +330,227 @@ export interface PDFGenerationResult {
   fileName?: string
   error?: string
 }
+
+// ---------------------------------------------------------------------------
+// Python streaming profile (/api/stream-profile proxy → FastAPI /profile)
+// ---------------------------------------------------------------------------
+
+export interface ExecutionStage {
+  name: string
+  mode: "streaming" | "in_memory" | "hybrid"
+  cacheable: boolean
+  cost: "low" | "medium" | "high"
+}
+
+export interface ExecutionInfo {
+  strategy: "streaming" | "in_memory" | "hybrid"
+  rowCount?: number
+  columnCount?: number
+  chunkSize?: number
+  fileSizeBytes?: number
+  availableMemoryBytes?: number
+  estimatedMemoryBytes?: number
+  estimatedRuntimeSeconds?: number
+  stages: ExecutionStage[]
+  notes: string[]
+}
+
+export interface ProfileColumn {
+  name: string
+  type: "continuous" | "categorical" | "ordinal" | "datetime" | "binary"
+  coded?: boolean | null
+  codeNote?: string | null
+  codeUncertain?: boolean | null
+  count: number
+  nullCount: number
+  nullPercentage: number
+  suggestedStrategy: string
+  cardinality?: number
+  cardinalityCapped?: boolean
+  sampleValues?: unknown[]
+  mean?: number
+  median?: number
+  mode?: unknown
+  stdDev?: number
+  variance?: number
+  min?: number
+  max?: number
+  range?: number
+  iqr?: number
+  skewness?: number
+  kurtosis?: number
+  outlierCount?: number
+  quantiles?: Record<string, number>
+  histogram?: {
+    bins: number[]
+    counts: number[]
+    n: number
+    nbins: number
+  }
+  frequencyTable?: Record<string, number>
+  frequencyCapped?: boolean
+}
+
+export interface ReproducibilityManifest {
+  fileHash: string
+  engineVersion: string
+  strategy: string
+  rowCount: number
+  columnCount: number
+  chunkSize: number
+  passes: number
+  elapsedSeconds: number
+  options: Record<string, unknown>
+}
+
+export interface VerificationReport {
+  passed: boolean
+  engineVersion: string
+  exactness: {
+    column: string
+    rowsChecked: number
+    meanDelta: number
+    varianceDelta: number
+    meanExact: boolean
+    varianceExact: boolean
+    minExact: boolean
+    maxExact: boolean
+  }[]
+  exactnessOk: boolean
+  consistency: string[]
+  consistencyOk: boolean
+  determinism: boolean
+  fullCrossCheck: {
+    columnsChecked: number
+    issues: string[]
+    passed: boolean
+    mode: string
+  } | null
+  notes: string[]
+}
+
+export interface StreamProfileResponse {
+  success: boolean
+  execution?: ExecutionInfo
+  fileName: string
+  rowCount: number
+  columnCount: number
+  columns: ProfileColumn[]
+  sampleRows: Record<string, unknown>[]
+  duplicateRowCount?: number | null
+  duplicateCountCapped: boolean
+  totalMissing: number
+  correlations?: {
+    columnA: string
+    columnB: string
+    r: number
+    n: number
+    method: string
+  }[]
+  manifest?: ReproducibilityManifest
+  verification?: VerificationReport | null
+  cacheHit?: boolean
+  error?: string
+}
+
+export interface ProfileJobResponse {
+  jobId: string
+  kind: "profile" | "analyse"
+  status: "queued" | "running" | "succeeded" | "failed"
+  progress: number
+  stage: string
+  message?: string | null
+  createdAt: number
+  startedAt?: number | null
+  finishedAt?: number | null
+  result?: StreamProfileResponse | null
+  error?: string | null
+}
+
+// ---------------------------------------------------------------------------
+// Visualization Intelligence Engine (VIE) — deterministic chart dashboard
+// ---------------------------------------------------------------------------
+
+export interface ChartAlternative {
+  chartType: string
+  title: string
+  confidence: number
+  reason: string
+}
+
+export interface ChartRecommendation {
+  chartType: string
+  title: string
+  intent: string
+  confidence: number
+  reason: string
+  advantages: string[]
+  limitations: string[]
+  alternatives: ChartAlternative[]
+}
+
+export interface VerificationCheck {
+  name: string
+  ok: boolean
+  message: string
+}
+
+export interface ChartVerification {
+  passed: boolean
+  checks: VerificationCheck[]
+  notes: string[]
+}
+
+export interface DetectedPattern {
+  name: string
+  column?: string | null
+  description: string
+  signal?: number | null
+}
+
+export interface VizIntent {
+  id: string
+  label: string
+  description: string
+  confidence: number
+  evidence: string[]
+}
+
+export interface ChartExplanation {
+  whyThisChart: string
+  whatItShows: string
+  howToInterpret: string
+  limitations: string
+}
+
+export interface VizChart {
+  id: string
+  section: string
+  intent: string
+  title: string
+  chartType: string
+  recommendation: ChartRecommendation
+  spec: Record<string, unknown>
+  verification: ChartVerification
+  explanation?: ChartExplanation
+}
+
+export interface VizSection {
+  id: string
+  title: string
+  description: string
+  charts: VizChart[]
+}
+
+export interface VisualizationResponse {
+  success: boolean
+  engine: string
+  fileName: string
+  rowCount: number
+  columnCount: number
+  detectedPatterns: DetectedPattern[]
+  intents: VizIntent[]
+  sections: VizSection[]
+  note?: string | null
+  error?: string | null
+}
