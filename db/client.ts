@@ -34,7 +34,7 @@ export async function getDb(): Promise<AnyDb> {
     }
     const postgres = (await import('postgres')).default
     const { drizzle } = await import('drizzle-orm/postgres-js')
-    const isLocal = /localhost|127\.0\.0\.1|:\d{4}\//.test(url)
+    const isLocal = /localhost|127\.0\.0\.1/.test(url)
     const client = postgres(url, {
       max: 5,
       prepare: false,
