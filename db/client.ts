@@ -34,13 +34,12 @@ export async function getDb(): Promise<AnyDb> {
     }
     const postgres = (await import('postgres')).default
     const { drizzle } = await import('drizzle-orm/postgres-js')
-    const needsSsl = url.includes('sslmode=require') || url.includes('ssl=true') ||
-      /neon|supabase|render|railway|fly\.io|elephantsql|croxy/i.test(url)
+    const isLocal = /localhost|127\.0\.0\.1|:\d{4}\//.test(url)
     const client = postgres(url, {
       max: 5,
       prepare: false,
       connect_timeout: 15,
-      ssl: needsSsl ? 'require' : undefined,
+      ssl: isLocal ? undefined : { rejectUnauthorized: false },
     })
     cachedDb = drizzle(client, { schema }) as unknown as AnyDb
     return cachedDb
