@@ -25,6 +25,15 @@ export const real = (isPg ? pg.real : sqlite.real) as unknown as typeof pg.real
 export const index = (isPg ? pg.index : sqlite.index) as unknown as typeof pg.index
 export const uniqueIndex = (isPg ? pg.uniqueIndex : sqlite.uniqueIndex) as unknown as typeof pg.uniqueIndex
 
+/**
+ * Timestamp column: uses `bigint` on Postgres (Date.now() ms overflows int4)
+ * and plain `integer` on SQLite (which is natively 64-bit).
+ */
+export const timestamp = (name: string) =>
+  isPg
+    ? (pg.bigint(name, { mode: 'number' }) as unknown as ReturnType<typeof pg.integer>)
+    : (sqlite.integer(name) as unknown as ReturnType<typeof pg.integer>)
+
 export type AnyColumn = pg.AnyPgColumn
 
 /**

@@ -1,4 +1,4 @@
-import { table, text, integer, real, index, uniqueIndex } from './table'
+import { table, text, integer, real, index, uniqueIndex, timestamp } from './table'
 
 export const users = table(
   'users',
@@ -10,11 +10,11 @@ export const users = table(
     avatarUrl: text('avatar_url'),
     accountType: text('account_type').notNull().default('personal'),
     status: text('status').notNull().default('active'),
-    emailVerifiedAt: integer('email_verified_at'),
+    emailVerifiedAt: timestamp('email_verified_at'),
     preferredAiProvider: text('preferred_ai_provider').notNull().default('groq'),
-    lastLoginAt: integer('last_login_at'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    lastLoginAt: timestamp('last_login_at'),
+    createdAt: timestamp('created_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
   },
   (t) => [uniqueIndex('users_email_idx').on(t.email)],
 )
@@ -29,8 +29,8 @@ export const organizations = table(
     ownerId: text('owner_id')
       .notNull()
       .references(() => users.id),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
   },
   (t) => [uniqueIndex('orgs_slug_idx').on(t.slug)],
 )
@@ -47,9 +47,9 @@ export const organizationMembers = table(
     status: text('status').notNull().default('active'),
     invitedEmail: text('invited_email'),
     inviteToken: text('invite_token'),
-    invitedAt: integer('invited_at'),
-    joinedAt: integer('joined_at'),
-    createdAt: integer('created_at').notNull(),
+    invitedAt: timestamp('invited_at'),
+    joinedAt: timestamp('joined_at'),
+    createdAt: timestamp('created_at').notNull(),
   },
   (t) => [
     uniqueIndex('org_members_org_user_idx').on(t.orgId, t.userId),
@@ -67,8 +67,8 @@ export const projects = table(
       .references(() => users.id),
     name: text('name').notNull(),
     description: text('description'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
   },
   (t) => [
     index('projects_owner_idx').on(t.ownerId),
@@ -102,9 +102,9 @@ export const datasets = table(
     version: integer('version').notNull().default(1),
     processingStatus: text('processing_status').notNull().default('stored'),
     analysisStatus: text('analysis_status').notNull().default('none'),
-    lastAccessedAt: integer('last_accessed_at'),
-    rawDeletedAt: integer('raw_deleted_at'),
-    createdAt: integer('created_at').notNull(),
+    lastAccessedAt: timestamp('last_accessed_at'),
+    rawDeletedAt: timestamp('raw_deleted_at'),
+    createdAt: timestamp('created_at').notNull(),
   },
   (t) => [
     index('datasets_owner_idx').on(t.ownerId),
@@ -133,7 +133,7 @@ export const analyses = table(
     providerUsed: text('provider_used'),
     modelType: text('model_type'),
     rowCount: integer('row_count'),
-    createdAt: integer('created_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
   },
   (t) => [
     index('analyses_owner_idx').on(t.ownerId),
@@ -151,10 +151,10 @@ export const sessions = table(
       .references(() => users.id),
     ip: text('ip'),
     userAgent: text('user_agent'),
-    expiresAt: integer('expires_at').notNull(),
-    lastSeenAt: integer('last_seen_at').notNull(),
-    revokedAt: integer('revoked_at'),
-    createdAt: integer('created_at').notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    lastSeenAt: timestamp('last_seen_at').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull(),
   },
   (t) => [index('sessions_user_idx').on(t.userId)],
 )
@@ -169,8 +169,8 @@ export const userAiKeys = table(
     provider: text('provider').notNull(),
     keyEncrypted: text('key_encrypted').notNull(),
     keyHint: text('key_hint').notNull(),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
   },
   (t) => [uniqueIndex('user_ai_keys_user_provider_idx').on(t.userId, t.provider)],
 )
@@ -186,8 +186,8 @@ export const orgAiKeys = table(
     keyEncrypted: text('key_encrypted').notNull(),
     keyHint: text('key_hint').notNull(),
     createdBy: text('created_by').references(() => users.id),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
   },
   (t) => [uniqueIndex('org_ai_keys_org_provider_idx').on(t.orgId, t.provider)],
 )
@@ -203,7 +203,7 @@ export const auditLogs = table(
     resourceId: text('resource_id'),
     meta: text('meta'),
     ip: text('ip'),
-    createdAt: integer('created_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
   },
   (t) => [index('audit_logs_org_idx').on(t.orgId)],
 )
@@ -229,9 +229,9 @@ export const uploads = table(
     totalChunks: integer('total_chunks').notNull(),
     receivedChunks: text('received_chunks').notNull().default('[]'),
     status: text('status').notNull().default('pending'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
-    completedAt: integer('completed_at'),
+    createdAt: timestamp('created_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
+    completedAt: timestamp('completed_at'),
   },
   (t) => [index('uploads_owner_idx').on(t.ownerId)],
 )
@@ -260,7 +260,7 @@ export const knowledgeFindings = table(
     impact: text('impact'),
     financialImpact: text('financial_impact'),
     kpiKey: text('kpi_key'),
-    createdAt: integer('created_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
   },
   (t) => [
     index('findings_owner_idx').on(t.ownerId),
@@ -282,8 +282,8 @@ export const knowledgeGlossary = table(
     definition: text('definition').notNull(),
     confidence: real('confidence').notNull().default(0.5),
     source: text('source').notNull().default('auto'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
   },
   (t) => [
     index('glossary_owner_idx').on(t.ownerId),
@@ -307,7 +307,7 @@ export const knowledgeKpis = table(
     unit: text('unit'),
     periodKey: text('period_key'),
     displayLabel: text('display_label'),
-    createdAt: integer('created_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
   },
   (t) => [
     index('kpis_owner_idx').on(t.ownerId),
@@ -331,7 +331,7 @@ export const knowledgeEmbeddings = table(
     model: text('model').notNull(),
     dimensions: integer('dimensions').notNull(),
     vector: text('vector').notNull(),
-    createdAt: integer('created_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
   },
   (t) => [
     index('embeddings_owner_idx').on(t.ownerId),
@@ -351,7 +351,7 @@ export const userPreferences = table(
     orgId: text('org_id').references(() => organizations.id),
     key: text('key').notNull(),
     value: text('value').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
   },
   (t) => [index('prefs_user_idx').on(t.userId)],
 )
