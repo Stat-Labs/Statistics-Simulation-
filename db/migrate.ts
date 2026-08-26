@@ -13,7 +13,8 @@ async function main() {
     const postgres = (await import('postgres')).default
     const { drizzle } = await import('drizzle-orm/postgres-js')
     const { migrate } = await import('drizzle-orm/postgres-js/migrator')
-    const client = postgres(url, { max: 1, prepare: false })
+    const isLocal = /localhost|127\.0\.0\.1/.test(url)
+    const client = postgres(url, { max: 1, prepare: false, ssl: isLocal ? undefined : { rejectUnauthorized: false } })
     await migrate(drizzle(client), { migrationsFolder: 'db/migrations/pg' })
     await client.end()
   } else {

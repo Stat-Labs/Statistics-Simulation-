@@ -33,14 +33,14 @@ export async function POST(request: NextRequest) {
 
   const db = await getDb()
 
-  // Reject if the email is already an active member.
+  // Reject if the email already has a pending invite for this org.
   const existing = await db
     .select()
     .from(organizationMembers)
     .where(
       and(
         eq(organizationMembers.orgId, session.org.id),
-        eq(organizationMembers.invitedEmail ?? organizationMembers.invitedEmail, email),
+        eq(organizationMembers.invitedEmail, email),
       ),
     )
     .limit(1)
